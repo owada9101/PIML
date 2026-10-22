@@ -33,13 +33,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--steps", type=int, default=1500)
     parser.add_argument("--train-samples", type=int, default=512)
+    parser.add_argument("--test-samples", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--physics-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--out", type=Path, default=Path("Example/cartpole_pino/outputs/pino"))
     args = parser.parse_args()
-    if args.steps < 1 or args.train_samples < 1 or args.batch_size < 1 or args.physics_weight < 0:
+    if min(args.steps, args.train_samples, args.test_samples, args.batch_size) < 1 or args.physics_weight < 0:
         parser.error("steps/samples/batch must be positive; physics weight must be nonnegative")
     args.out.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(args.threads)
@@ -48,9 +49,12 @@ def main():
     model = PINO()
     train = tensor_dataset(args.train_samples, 65, model.horizon, args.seed)
     validation = tensor_dataset(64, 65, model.horizon, args.seed + 10000)
+    with torch.no_grad():
+        before, _ = model(validation[0], validation[1])
+        initial_validation = ((before - validation[2]) / model.scales).square().mean().item()
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.steps, eta_min=2e-4)
-    history, best = [], float("inf")
+    history, best = [dict(step=0, validation=initial_validation)], float("inf")
     start = time.perf_counter()
     for step in range(1, args.steps + 1):
         model.train()
@@ -83,12 +87,13 @@ def main():
     elapsed = time.perf_counter() - start
     model, checkpoint = load_model(args.out / "model.pt")
     # A separate force/initial-state draw is used once, after checkpoint selection.
-    test = tensor_dataset(64, 65, model.horizon, args.seed + 20000)
-    fine = tensor_dataset(64, 129, model.horizon, args.seed + 20000)
+    test = tensor_dataset(args.test_samples, 65, model.horizon, args.seed + 20000)
+    fine = tensor_dataset(args.test_samples, 129, model.horizon, args.seed + 20000)
     with torch.no_grad():
         prediction, acceleration = model(test[0], test[1])
         fine_prediction, _ = model(fine[0], fine[1])
         metrics = dict(best_step=checkpoint["best_step"], training_seconds=elapsed,
+                       initial_validation_scaled_rmse=initial_validation ** 0.5,
                        test_rmse_si=(prediction - test[2]).square().mean(dim=(0, 1)).sqrt().tolist(),
                        test_scaled_rmse=(((prediction - test[2]) / model.scales).square().mean().sqrt().item()),
                        test_physics_rms=model.residual(prediction, acceleration, test[1]).square().mean().sqrt().item(),

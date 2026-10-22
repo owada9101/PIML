@@ -33,7 +33,7 @@ class OperatorMPC:
         self.Q = torch.tensor(Q.diagonal(), dtype=torch.float32)
         self.R = R
 
-    def action(self, state):
+    def action(self, state, disturbance_estimate=0.0):
         # Initial guess is the shifted previous plan, zero on the first call.
         raw = torch.cat([self.previous[1:], self.previous[-1:]]).clone().requires_grad_()
         optimizer = torch.optim.LBFGS([raw], lr=1.0, max_iter=self.iterations,
@@ -45,7 +45,7 @@ class OperatorMPC:
             knots = self.force_limit * raw.tanh()
             forces = F.interpolate(knots[None, None], size=65, mode="linear",
                                    align_corners=True)[:, 0]
-            states, _ = self.model(initial, forces)
+            states, _ = self.model(initial, forces + disturbance_estimate)
             stage = (states.square() * self.Q).sum(dim=-1) + self.R * forces.square()
             cost = torch.trapezoid(stage, dx=self.model.horizon / 64).mean()
             terminal = states[:, -1]
@@ -61,29 +61,39 @@ class OperatorMPC:
             knots = self.force_limit * raw.tanh()
             forces = F.interpolate(knots[None, None], size=65, mode="linear",
                                    align_corners=True)[:, 0]
-            states, _ = self.model(initial, forces)
+            states, _ = self.model(initial, forces + disturbance_estimate)
         return knots[:2].detach().numpy().astype(float), states[0, 8].numpy()
 
 
-def rollout(kind, initial, duration, p, mpc=None, disturbance=2.0):
+def rollout(kind, initial, duration, p, mpc=None, disturbance=2.0,
+            quantization=None, observe_disturbance=False, disturbance_bias=0.0, plant_substeps=10):
     dt = mpc.dt if mpc is not None else 0.05
     K, _, Q, R = lqr(p)
     states, forces, elapsed, errors = [np.asarray(initial, dtype=float)], [], [], []
     reason = None
+    observed_states, total_forces, predicted_forces = [], [], []
     for i in range(round(duration / dt)):
         t = i * dt
+        external = disturbance if 1.5 <= t < 1.6 - 1e-9 else 0.0
+        observed = states[-1].copy()
+        if quantization is not None:
+            observed = np.round(observed / quantization) * quantization
+        estimate = external + disturbance_bias if observe_disturbance else 0.0
+        observed_states.append(observed)
         start = time.perf_counter()
         if kind.endswith("_mpc"):
-            action, predicted = mpc.action(states[-1])
+            action, predicted = mpc.action(observed, estimate)
+            predicted_forces.append((mpc.force_limit * mpc.previous.tanh()).numpy() + estimate)
         elif kind == "lqr":
-            action = np.full(2, np.clip(-K @ states[-1], -10, 10))
+            action = np.full(2, np.clip(-K @ observed, -10, 10))
         else:
             action = np.zeros(2)
         elapsed.append(time.perf_counter() - start)
-        # Unknown to the controller; the next measurement exposes its effect.
-        external = disturbance if 1.5 <= t < 1.6 - 1e-9 else 0.0
+        # Nominal runs do not expose the disturbance. Optional coarse runs hold
+        # the current estimate across the horizon, without future pulse timing.
+        total_forces.append(action + external)
         state = rk4_step(states[-1], action[0] + external, action[1] + external,
-                         dt, p, substeps=10)
+                         dt, p, substeps=plant_substeps)
         if kind.endswith("_mpc"):
             errors.append((state - predicted).tolist())
         states.append(state)
@@ -115,8 +125,20 @@ def rollout(kind, initial, duration, p, mpc=None, disturbance=2.0):
                    max_planning_ms=float(np.max(elapsed) * 1000),
                    max_force_N=float(abs(forces).max()),
                    accumulated_stage_cost=float(stage.sum() * dt))
+    warm = np.asarray(elapsed[1:] if len(elapsed) > 1 else elapsed) * 1000
+    metrics.update(first_planning_ms=elapsed[0] * 1000,
+                   warm_median_planning_ms=float(np.median(warm)),
+                   warm_p95_planning_ms=float(np.quantile(warm, 0.95)),
+                   warm_max_planning_ms=float(np.max(warm)),
+                   warm_deadline_miss_fraction=float(np.mean(warm > dt * 1000)),
+                   observation_outside_training_fraction=float(np.mean(np.any(
+                       np.abs(observed_states) > np.array([0.4, 1.0, 0.3, 1.5]), axis=1))),
+                   max_actual_total_force_N=float(np.abs(total_forces).max()),
+                   max_predicted_total_force_N=float(np.abs(predicted_forces).max()) if predicted_forces else None)
     return dict(times=times, states=states, forces=forces, planning_seconds=np.array(elapsed),
-                one_step_error=np.array(errors)), metrics
+                one_step_error=np.array(errors), observed_states=np.array(observed_states),
+                actual_total_forces=np.array(total_forces),
+                predicted_total_force_knots=np.array(predicted_forces)), metrics
 
 
 def animate(result, path, p, controller_label):

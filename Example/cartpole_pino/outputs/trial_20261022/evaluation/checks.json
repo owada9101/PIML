@@ -1,0 +1,13 @@
+{
+  "saved_control_runs": 90,
+  "finite_states": true,
+  "control_limit_verified": true,
+  "paired_test_draws_identical": true,
+  "rk4_half_step_replay_max_abs_state_error": [
+    0.04588644990267793,
+    0.4222813148469836,
+    5.008790839002913,
+    9.448147412867057
+  ],
+  "note": "Recorded controls replayed with 20 rather than 10 RK4 substeps; control plans not recomputed."
+}
