@@ -1,0 +1,81 @@
+{
+  "initial_state": [
+    0.2,
+    0,
+    0.17453292519943295,
+    0
+  ],
+  "dt": 0.05,
+  "horizon": 0.4,
+  "checkpoint": "/Users/owada9101/code/PIML/Example/cartpole_pino/outputs/pino/model.pt",
+  "training_seed": 0,
+  "physics_weight": 1.0,
+  "disturbance": {
+    "force_N": 2.0,
+    "start_s": 1.5,
+    "end_s": 1.6
+  },
+  "model_fallback": false,
+  "metrics": [
+    {
+      "controller": "uncontrolled",
+      "simulated_seconds": 0.4,
+      "failure": "angle_exceeded_30_degrees",
+      "balanced_entire_run": false,
+      "settled_at_end": false,
+      "max_angle_deg": 32.27336085546755,
+      "max_cart_m": 0.21637777807887965,
+      "final_state": [
+        0.21637777807887965,
+        0.09292321926361362,
+        0.5632764076121626,
+        2.417842940712926
+      ],
+      "mean_planning_ms": 0.00038037251215428114,
+      "p95_planning_ms": 0.0006747977749910203,
+      "max_planning_ms": 0.000790998456068337,
+      "max_force_N": 0.0,
+      "accumulated_stage_cost": 3.5169654211383428
+    },
+    {
+      "controller": "lqr",
+      "simulated_seconds": 5.0,
+      "failure": null,
+      "balanced_entire_run": true,
+      "settled_at_end": true,
+      "max_angle_deg": 10.0,
+      "max_cart_m": 0.2,
+      "final_state": [
+        7.10576850257653e-06,
+        0.00251953801416796,
+        0.0006124780680177146,
+        -0.000806968201953252
+      ],
+      "mean_planning_ms": 0.0033375700877513736,
+      "p95_planning_ms": 0.0038854508602526035,
+      "max_planning_ms": 0.012541990145109594,
+      "max_force_N": 10.0,
+      "accumulated_stage_cost": 1.417931999354012
+    },
+    {
+      "controller": "pino_mpc",
+      "simulated_seconds": 5.0,
+      "failure": null,
+      "balanced_entire_run": true,
+      "settled_at_end": true,
+      "max_angle_deg": 10.0,
+      "max_cart_m": 0.2,
+      "final_state": [
+        -0.015869344437033597,
+        0.0036817930516213826,
+        0.0007939785770772309,
+        -0.0007750650506241192
+      ],
+      "mean_planning_ms": 24.773724149126792,
+      "p95_planning_ms": 22.540331255004276,
+      "max_planning_ms": 399.21145798871294,
+      "max_force_N": 7.184202194213867,
+      "accumulated_stage_cost": 1.3443911707087288
+    }
+  ]
+}
